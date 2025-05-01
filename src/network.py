@@ -9,10 +9,11 @@ from lightning.pytorch.loggers.wandb import WandbLogger
 from torch import nn
 from torchvision import models
 from torchvision.models.alexnet import AlexNet
+from torchvision.models.resnet import ResNet, BasicBlock, Bottleneck
 import torch
 
 # Custom packages
-from src.metric import MyAccuracy
+from src.metric import MyAccuracy, MyF1Score
 import src.config as cfg
 from src.util import show_setting
 
@@ -20,11 +21,13 @@ from src.util import show_setting
 # [TODO: Optional] Rewrite this class if you want
 class MyNetwork(AlexNet):
     def __init__(self):
-        super().__init__()
+        super().__init__(
+            num_classes = 200,
+            dropout = 0.5
+        )
 
         # [TODO] Modify feature extractor part in AlexNet
-
-
+        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # [TODO: Optional] Modify this as well if you want
         x = self.features(x)
@@ -56,6 +59,7 @@ class SimpleClassifier(LightningModule):
 
         # Metric
         self.accuracy = MyAccuracy()
+        self.f1score = MyF1Score(num_classes=num_classes)
 
         # Hyperparameters
         self.save_hyperparameters()
@@ -63,6 +67,16 @@ class SimpleClassifier(LightningModule):
     def on_train_start(self):
         show_setting(cfg)
 
+    # def configure_optimizers(self):
+    #     optim_params = copy.deepcopy(self.hparams.optimizer_params)
+    #     optim_type = optim_params.pop('type')
+    #     optimizer = getattr(torch.optim, optim_type)(self.parameters(), **optim_params)
+
+    #     scheduler_params = copy.deepcopy(self.hparams.scheduler_params)
+    #     scheduler_type = scheduler_params.pop('type')
+    #     scheduler = getattr(torch.optim.lr_scheduler, scheduler_type)(optimizer, **scheduler_params)
+    #     return {'optimizer': optimizer, 'lr_scheduler': scheduler}
+    
     def configure_optimizers(self):
         optim_params = copy.deepcopy(self.hparams.optimizer_params)
         optim_type = optim_params.pop('type')
@@ -70,7 +84,25 @@ class SimpleClassifier(LightningModule):
 
         scheduler_params = copy.deepcopy(self.hparams.scheduler_params)
         scheduler_type = scheduler_params.pop('type')
-        scheduler = getattr(torch.optim.lr_scheduler, scheduler_type)(optimizer, **scheduler_params)
+
+        if scheduler_type == 'OneCycleLR':
+            scheduler = {
+                'scheduler': torch.optim.lr_scheduler.OneCycleLR(
+                    optimizer,
+                    max_lr=scheduler_params.pop('max_lr'),
+                    steps_per_epoch=self.trainer.estimated_stepping_batches // self.trainer.max_epochs,
+                    **scheduler_params
+                ),
+                'interval': 'step',
+                'frequency': 1
+            }
+        else:
+            scheduler = {
+                'scheduler': getattr(torch.optim.lr_scheduler, scheduler_type)(optimizer, **scheduler_params),
+                'interval': 'epoch',
+                'frequency': 1
+            }
+
         return {'optimizer': optimizer, 'lr_scheduler': scheduler}
 
     def forward(self, x):
@@ -86,9 +118,15 @@ class SimpleClassifier(LightningModule):
     def validation_step(self, batch, batch_idx):
         loss, scores, y = self._common_step(batch)
         accuracy = self.accuracy(scores, y)
+        self.f1score.update(scores, y)
         self.log_dict({'loss/val': loss, 'accuracy/val': accuracy},
                       on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self._wandb_log_image(batch, batch_idx, scores, frequency = cfg.WANDB_IMG_LOG_FREQ)
+
+    def on_validation_epoch_end(self):
+        f1_per_class = self.f1score.compute()
+        macro_f1 = f1_per_class.mean()
+        self.log("f1/val_macro", macro_f1, prog_bar=True, logger=True)
 
     def _common_step(self, batch):
         x, y = batch

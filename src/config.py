@@ -6,9 +6,17 @@ BATCH_SIZE          = 512
 VAL_EVERY_N_EPOCH   = 1
 
 NUM_EPOCHS          = 40
-OPTIMIZER_PARAMS    = {'type': 'SGD', 'lr': 0.005, 'momentum': 0.9}
-SCHEDULER_PARAMS    = {'type': 'MultiStepLR', 'milestones': [30, 35], 'gamma': 0.2}
 
+OPTIMIZER_PARAMS    = {'type': 'AdamW', 'lr': 0.001, 'weight_decay': 0.001}
+SCHEDULER_PARAMS    = {
+    'type': 'OneCycleLR',
+    'max_lr': 0.001,
+    'epochs': NUM_EPOCHS,
+    'pct_start': 0.1,
+    'anneal_strategy': 'cos',
+    'div_factor': 25.0,       # initial_lr = max_lr / div_factor
+    'final_div_factor': 1e4   # eta_min = max_lr / final_div_factor
+}
 # Dataaset
 DATASET_ROOT_PATH   = 'datasets/'
 NUM_WORKERS         = 8
@@ -22,7 +30,7 @@ IMAGE_MEAN          = [0.4802, 0.4481, 0.3975]
 IMAGE_STD           = [0.2302, 0.2265, 0.2262]
 
 # Network
-MODEL_NAME          = 'resnet18'
+MODEL_NAME          = 'efficientnet_b0'
 
 # Compute related
 ACCELERATOR         = 'gpu'

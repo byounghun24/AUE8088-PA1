@@ -1,0 +1,17 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/byounghun/workspace/PA/AUE8088-PA1/train.py",
+            "cwd": "/home/byounghun/workspace/PA/AUE8088-PA1",
+            "console": "integratedTerminal"
+        }
+    ]
+}
