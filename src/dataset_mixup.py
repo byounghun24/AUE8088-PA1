@@ -16,6 +16,23 @@ from torchvision.datasets import ImageFolder
 # Custom packages
 import src.config as cfg
 
+def mixup_collate_fn(batch, alpha=1.0, num_classes=200):
+    images, labels = zip(*batch)
+    images = torch.stack(images)
+    labels = torch.tensor(labels)
+
+    # MixUp lambda
+    lam = np.random.beta(alpha, alpha)
+    indices = torch.randperm(images.size(0))
+
+    mixed_images = lam * images + (1 - lam) * images[indices]
+
+    # one-hot 라벨
+    labels_onehot = torch.nn.functional.one_hot(labels, num_classes=num_classes).float()
+    mixed_labels = lam * labels_onehot + (1 - lam) * labels_onehot[indices]
+
+    return mixed_images, mixed_labels
+
 class TinyImageNetDatasetModule(LightningDataModule):
     __DATASET_NAME__ = 'tiny-imagenet-200'
 
@@ -65,6 +82,7 @@ class TinyImageNetDatasetModule(LightningDataModule):
             pin_memory=True,
             num_workers=cfg.NUM_WORKERS,
             batch_size=self.batch_size,
+            collate_fn=lambda batch: mixup_collate_fn(batch, alpha=0.2, num_classes=cfg.NUM_CLASSES)
         )
 
     def val_dataloader(self):

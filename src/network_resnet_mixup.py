@@ -18,34 +18,53 @@ from src.metric import MyAccuracy, MyF1Score
 import src.config as cfg
 from src.util import show_setting
 
-# [TODO: Optional] Rewrite this class if you want
-class MyNetwork(AlexNet):
-    def __init__(self, num_classes, dropout):
-        super().__init__(
-            num_classes = num_classes,
-            dropout = dropout
+class SoftCrossEntropy(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred_logits, soft_labels):
+        soft_labels = soft_labels.clamp(min=1e-6)
+        log_probs = F.log_softmax(pred_logits, dim=1)
+        return -(soft_labels * log_probs).sum(dim=1).mean()
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels)
         )
-        # [TODO] Modify feature extractor part in AlexNet
+        self.relu = nn.ReLU(inplace=True)
+
+        # downsampling for shortcut if needed
+        self.downsample = None
+        if stride != 1 or in_channels != out_channels:
+            self.downsample = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        identity = x
+        out = self.conv(x)
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity
+        return self.relu(out)
+    
+class MyNetwork(nn.Module):
+    def __init__(self, num_classes, dropout):
+        super().__init__()
+
         self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),  # 64x64 → 32x32
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(128, 192, kernel_size=3, stride=2, padding=1),  # 32x32 → 16x16
-            nn.BatchNorm2d(192),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(192, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-
-            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),  # 16x16 → 8x8
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
+            ResidualBlock(3, 64, stride=2),
+            ResidualBlock(64, 128, stride=1),
+            ResidualBlock(128, 192, stride=2),
+            ResidualBlock(192, 256, stride=1),
+            ResidualBlock(256, 256, stride=2),
         )
 
         self.avgpool = nn.AdaptiveAvgPool2d((4, 4))
@@ -74,7 +93,7 @@ class SimpleClassifier(LightningModule):
                  num_classes: int = 200,
                  optimizer_params: Dict = dict(),
                  scheduler_params: Dict = dict(),
-                 dropout: float = 0.5,
+                 dropout: float = 0.3,
         ):
         super().__init__()
 
@@ -87,7 +106,7 @@ class SimpleClassifier(LightningModule):
             self.model = models.get_model(model_name, num_classes=num_classes, dropout=dropout)
 
         # Loss function
-        self.loss_fn = nn.CrossEntropyLoss()
+        self.loss_fn = SoftCrossEntropy()
 
         # Metric
         self.accuracy = MyAccuracy()
@@ -141,29 +160,33 @@ class SimpleClassifier(LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        loss, scores, y = self._common_step(batch)
-        accuracy = self.accuracy(scores, y)
-        self.log_dict({'loss/train': loss, 'accuracy/train': accuracy},
-                      on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        loss, scores, y = self._common_step(batch, is_train=True)
+        accuracy = self.accuracy(scores, torch.argmax(y, dim=1))  # convert to int
+        self.log_dict({'loss/train': loss, 'accuracy/train': accuracy}, ...)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, scores, y = self._common_step(batch)
-        accuracy = self.accuracy(scores, y)
+        loss, scores, y = self._common_step(batch, is_train=False)
+        accuracy = self.accuracy(scores, y)  # y는 이미 정수형
         self.f1score.update(scores, y)
-        self.log_dict({'loss/val': loss, 'accuracy/val': accuracy},
-                      on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self._wandb_log_image(batch, batch_idx, scores, frequency = cfg.WANDB_IMG_LOG_FREQ)
+        self.log_dict({'loss/val': loss, 'accuracy/val': accuracy}, ...)
+        self._wandb_log_image(batch, batch_idx, scores, frequency=cfg.WANDB_IMG_LOG_FREQ)
+
 
     def on_validation_epoch_end(self):
         f1_per_class = self.f1score.compute()
         macro_f1 = f1_per_class.mean()
         self.log("f1/val_macro", macro_f1, prog_bar=True, logger=True)
 
-    def _common_step(self, batch):
+    def _common_step(self, batch, is_train=True):
         x, y = batch
         scores = self.forward(x)
-        loss = self.loss_fn(scores, y)
+
+        if is_train:
+            loss = self.loss_fn(scores, y)  # soft label
+        else:
+            loss = F.cross_entropy(scores, y)  # hard label
+
         return loss, scores, y
 
     def _wandb_log_image(self, batch, batch_idx, preds, frequency = 100):

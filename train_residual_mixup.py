@@ -1,26 +1,23 @@
-import argparse
-import os
-import torch
-from lightning import Trainer
+"""
+    [AUE8088] PA1: Image Classification
+        - To run: (aue8088) $ python train.py
+        - For better flexibility, consider using LightningCLI in PyTorch Lightning
+"""
+# PyTorch & Pytorch Lightning
 from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning import Trainer
+import torch
 
 # Custom packages
-from src.dataset import TinyImageNetDatasetModule
-from src.network import SimpleClassifier
+from src.dataset_mixup import TinyImageNetDatasetModule
+from src.network_resnet_mixup import SimpleClassifier
 import src.config as cfg
 
 torch.set_float32_matmul_precision('medium')
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default=cfg.MODEL_NAME, help="Model name to use")
-    args = parser.parse_args()
-
-    cfg.MODEL_NAME = args.model_name
-
-    cfg.WANDB_NAME = f'{cfg.MODEL_NAME}-B{cfg.BATCH_SIZE}-{cfg.OPTIMIZER_PARAMS["type"]}'
-    cfg.WANDB_NAME += f'-{cfg.SCHEDULER_PARAMS["type"]}{cfg.OPTIMIZER_PARAMS["lr"]:.1E}'
 
     model = SimpleClassifier(
         model_name = cfg.MODEL_NAME,

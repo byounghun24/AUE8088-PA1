@@ -18,6 +18,14 @@ from src.metric import MyAccuracy, MyF1Score
 import src.config as cfg
 from src.util import show_setting
 
+class SoftCrossEntropy(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred_logits, soft_labels):
+        soft_labels = soft_labels.clamp(min=1e-6)
+        log_probs = F.log_softmax(pred_logits, dim=1)
+        return -(soft_labels * log_probs).sum(dim=1).mean()
 # [TODO: Optional] Rewrite this class if you want
 class MyNetwork(AlexNet):
     def __init__(self, num_classes, dropout):
@@ -74,7 +82,7 @@ class SimpleClassifier(LightningModule):
                  num_classes: int = 200,
                  optimizer_params: Dict = dict(),
                  scheduler_params: Dict = dict(),
-                 dropout: float = 0.5,
+                 dropout: float = 0.3,
         ):
         super().__init__()
 
@@ -87,7 +95,7 @@ class SimpleClassifier(LightningModule):
             self.model = models.get_model(model_name, num_classes=num_classes, dropout=dropout)
 
         # Loss function
-        self.loss_fn = nn.CrossEntropyLoss()
+        self.loss_fn = SoftCrossEntropy()
 
         # Metric
         self.accuracy = MyAccuracy()
@@ -141,29 +149,33 @@ class SimpleClassifier(LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        loss, scores, y = self._common_step(batch)
-        accuracy = self.accuracy(scores, y)
-        self.log_dict({'loss/train': loss, 'accuracy/train': accuracy},
-                      on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        loss, scores, y = self._common_step(batch, is_train=True)
+        accuracy = self.accuracy(scores, torch.argmax(y, dim=1))  # convert to int
+        self.log_dict({'loss/train': loss, 'accuracy/train': accuracy}, ...)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, scores, y = self._common_step(batch)
-        accuracy = self.accuracy(scores, y)
+        loss, scores, y = self._common_step(batch, is_train=False)
+        accuracy = self.accuracy(scores, y)  # y는 이미 정수형
         self.f1score.update(scores, y)
-        self.log_dict({'loss/val': loss, 'accuracy/val': accuracy},
-                      on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self._wandb_log_image(batch, batch_idx, scores, frequency = cfg.WANDB_IMG_LOG_FREQ)
+        self.log_dict({'loss/val': loss, 'accuracy/val': accuracy}, ...)
+        self._wandb_log_image(batch, batch_idx, scores, frequency=cfg.WANDB_IMG_LOG_FREQ)
+
 
     def on_validation_epoch_end(self):
         f1_per_class = self.f1score.compute()
         macro_f1 = f1_per_class.mean()
         self.log("f1/val_macro", macro_f1, prog_bar=True, logger=True)
 
-    def _common_step(self, batch):
+    def _common_step(self, batch, is_train=True):
         x, y = batch
         scores = self.forward(x)
-        loss = self.loss_fn(scores, y)
+
+        if is_train:
+            loss = self.loss_fn(scores, y)  # soft label
+        else:
+            loss = F.cross_entropy(scores, y)  # hard label
+
         return loss, scores, y
 
     def _wandb_log_image(self, batch, batch_idx, preds, frequency = 100):

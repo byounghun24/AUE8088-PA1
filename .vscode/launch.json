@@ -9,9 +9,10 @@
             "name": "train",
             "type": "debugpy",
             "request": "launch",
-            "program": "/home/byounghun/workspace/PA/AUE8088-PA1/train.py",
+            "program": "/home/byounghun/workspace/PA/AUE8088-PA1/train_mixup.py",
             "cwd": "/home/byounghun/workspace/PA/AUE8088-PA1",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

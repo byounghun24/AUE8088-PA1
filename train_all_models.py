@@ -13,4 +13,4 @@ model_list = [
 
 for model_name in model_list:
     print(f"\n===== Training model: {model_name} =====")
-    os.system(f"python train_models.py --model_name {model_name}")
+    os.system(f"python efficientnet_b0tob7.py --model_name {model_name}")
